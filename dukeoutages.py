@@ -111,7 +111,7 @@ def hit_duke(jurisdictions, headers, cookies):
             jurisdiction = jurisdiction
             affected = nugget["customersAffectedNumber"]
             cause = nugget["outageCause"]
-            convex_hull = nugget["convexHull"]
+            convex_hull = json.dumps(nugget["convexHull"])
 
             entry = {
                 "source_event_number": source_event_number,
@@ -208,8 +208,6 @@ def save_outages(data):
 
             for entry in data:
                 try:
-                    entry['convex_hull'] = json.dumps(entry['convex_hull'])
-
                     cur.execute("""
                         SELECT COUNT(*) FROM duke_outages
                         WHERE outage_identifer = %(source_event_number)s
