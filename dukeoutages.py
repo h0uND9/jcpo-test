@@ -7,6 +7,8 @@ from decouple import config
 import psycopg2
 from datetime import datetime
 
+from dukeauth import get_auth
+
 # For area data, census block, county, state, and market area information based on latitude/longitude input
 area_url = "https://geo.fcc.gov/api/census/area"
 geo_url = "https://geocoding.geo.census.gov/geocoder/geographies/coordinates"
@@ -145,7 +147,7 @@ def create_tables():
                 outage_identifer TEXT UNIQUE,
                 device_lat DECIMAL,
                 device_lon DECIMAL,
-                convex_hull JSONB,
+                convex_hull JSON,
                 jurisdiction TEXT,
                 affected INTEGER,
                 cause TEXT,
@@ -159,7 +161,7 @@ def create_tables():
                 device_lat DECIMAL,
                 device_lon DECIMAL,
                 block_fips DECIMAL,
-                convex_hull JSONB,
+                convex_hull JSON,
                 jurisdiction TEXT,
                 origin TEXT, 
                 state TEXT,
@@ -198,7 +200,7 @@ def save_outages(data):
                     outage_identifer TEXT,
                     device_lat DECIMAL,
                     device_lon DECIMAL,
-                    convex_hull JSONB,
+                    convex_hull JSON,
                     jurisdiction TEXT,
                     affected INTEGER,
                     cause TEXT,
@@ -269,7 +271,7 @@ def save_tracker(data):
                     device_lat DECIMAL,
                     device_lon DECIMAL,
                     block_fips DECIMAL,
-                    convex_hull JSONB,
+                    convex_hull JSON,
                     jurisdiction TEXT,
                     origin TEXT,
                     state TEXT,
@@ -305,6 +307,17 @@ def save_tracker(data):
                         # entry['tract'] = additional_data['tract']
 
                         entry['outage_restored'] = False
+
+                        try:
+                            if entry['convex_hull'] in [None, 'null', '']:
+                                entry['convex_hull'] = json.dumps([])
+                            else:
+                                # Ensure it's valid JSON
+                                json.loads(entry['convex_hull'])
+                        except json.JSONDecodeError as e:
+                            print(
+                                f"Invalid JSON for convex_hull: {entry['convex_hull']}")
+                            entry['convex_hull'] = json.dumps([])
 
                         cur.execute("""
                             INSERT INTO outage_tracker (
