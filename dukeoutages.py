@@ -7,8 +7,6 @@ from decouple import config
 import psycopg2
 from datetime import datetime
 
-from dukeauth import get_auth
-
 # For area data, census block, county, state, and market area information based on latitude/longitude input
 area_url = "https://geo.fcc.gov/api/census/area"
 geo_url = "https://geocoding.geo.census.gov/geocoder/geographies/coordinates"
@@ -38,23 +36,31 @@ Note: Either this method or the hit_geo method can be used, not both
 
 
 def hit_fcc(nugget):
-    lat = nugget["device_lat"]
-    lon = nugget["device_lon"]
+    try:
+        lat = nugget["device_lat"]
+        lon = nugget["device_lon"]
 
-    area_request = requests.get(
-        f"{area_url}?lat={lat}&lon={lon}&censusYear={censusYear}&format=json"
-    )
+        area_request = requests.get(
+            f"{area_url}?lat={lat}&lon={lon}&censusYear={censusYear}&format=json"
+        )
 
-    area_data = json.loads(area_request.content)
-    for result in area_data["results"]:
-        state = result["state_name"]
-        county = result["county_name"]
-        block_fips = result["block_fips"]
+        area_data = json.loads(area_request.content)
+        for result in area_data["results"]:
+            state = result["state_name"]
+            county = result["county_name"]
+            block_fips = result["block_fips"]
 
+            entry = {
+                "block_fips": block_fips,
+                "state": state,
+                "county": county,
+            }
+    except Exception as e:
+        print(f"A FCC error occurred: Inserting data without block_fips")
         entry = {
-            "block_fips": block_fips,
-            "state": state,
-            "county": county,
+            "block_fips": None,
+            "state": "",
+            "county": "",
         }
 
     return entry
@@ -92,43 +98,88 @@ def hit_geo(nugget):
 
 
 """
+Method for getting area data making use of both the FCC API
+and the Census geographies API based on latitude and longitude
+"""
+
+
+# def get_area_data(nugget):
+#     fcc_entry = hit_fcc(nugget)
+
+#     if fcc_entry["block_fips"] is None:
+#         try:
+#             geo_entry = hit_geo(nugget)
+
+#             final_entry = {
+#                 "block_fips": None,
+#                 "state": geo_entry.get("state", ""),
+#                 "county": geo_entry.get("county", ""),
+#                 "fips": geo_entry.get("fips", ""),
+#                 "tract": geo_entry.get("tract", "")
+#             }
+#         except Exception as e:
+#             print(
+#                 f"An error occurred with hit_geo.")
+
+#             final_entry = {
+#                 "block_fips": None,
+#                 "state": "",
+#                 "county": "",
+#                 "fips": "",
+#                 "tract": ""
+#             }
+#     else:
+#         final_entry = {
+#             "block_fips": fcc_entry["block_fips"],
+#             "state": fcc_entry["state"],
+#             "county": fcc_entry["county"],
+#             "fips": None,
+#             "tract": None
+#         }
+
+#     return final_entry
+
+
+"""
 Method for hitting the Duke Power API to get outage data based on jurisdiction
 """
 
 
 def hit_duke(jurisdictions, headers, cookies):
     master = []
+    try:
+        for jurisdiction in jurisdictions:
+            outages_res = requests.get(
+                f"{outages_url}{jurisdiction}", headers=headers, cookies=cookies
+            )
 
-    for jurisdiction in jurisdictions:
-        outages_res = requests.get(
-            f"{outages_url}{jurisdiction}", headers=headers, cookies=cookies
-        )
+            outages_data = json.loads(outages_res.content)
 
-        outages_data = json.loads(outages_res.content)
+            for nugget in outages_data["data"]:
+                source_event_number = nugget["sourceEventNumber"]
+                device_lat = nugget["deviceLatitudeLocation"]
+                device_lon = nugget["deviceLongitudeLocation"]
+                jurisdiction = jurisdiction
+                affected = nugget["customersAffectedNumber"]
+                cause = nugget["outageCause"]
+                convex_hull = json.dumps(nugget["convexHull"])
 
-        for nugget in outages_data["data"]:
-            source_event_number = nugget["sourceEventNumber"]
-            device_lat = nugget["deviceLatitudeLocation"]
-            device_lon = nugget["deviceLongitudeLocation"]
-            jurisdiction = jurisdiction
-            affected = nugget["customersAffectedNumber"]
-            cause = nugget["outageCause"]
-            convex_hull = json.dumps(nugget["convexHull"])
+                entry = {
+                    "source_event_number": source_event_number,
+                    "device_lat": device_lat,
+                    "device_lon": device_lon,
+                    "convex_hull": convex_hull,
+                    "jurisdiction": jurisdiction,
+                    "affected": affected,
+                    "cause": cause,
+                    "origin": "Duke Energy",
+                }
 
-            entry = {
-                "source_event_number": source_event_number,
-                "device_lat": device_lat,
-                "device_lon": device_lon,
-                "convex_hull": convex_hull,
-                "jurisdiction": jurisdiction,
-                "affected": affected,
-                "cause": cause,
-                "origin": "Duke Energy",
-            }
+                master.append(entry)
 
-            master.append(entry)
-
-    return master
+        return master
+    except Exception as e:
+        print(f"Error hitting Duke Power API: {str(e)}")
 
 
 """
@@ -267,7 +318,7 @@ def save_tracker(data):
 
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS outage_tracker (
-                    outage_identifer TEXT,
+                    outage_identifer TEXT UNIQUE,
                     device_lat DECIMAL,
                     device_lon DECIMAL,
                     block_fips DECIMAL,
@@ -296,10 +347,10 @@ def save_tracker(data):
                     count = cur.fetchone()[0]
 
                     if count == 0:
-                        additional_data = hit_fcc(entry) or {}
+                        additional_data = hit_fcc(entry)
 
-                        # Merge the additional data into the entry dictionary
-                        entry['block_fips'] = additional_data['block_fips'] if 'block_fips' in additional_data else None
+                        # # Merge the additional data into the entry dictionary
+                        entry['block_fips'] = additional_data['block_fips']
                         entry['state'] = additional_data['state']
                         entry['county'] = additional_data['county']
 
@@ -307,17 +358,6 @@ def save_tracker(data):
                         # entry['tract'] = additional_data['tract']
 
                         entry['outage_restored'] = False
-
-                        try:
-                            if entry['convex_hull'] in [None, 'null', '']:
-                                entry['convex_hull'] = json.dumps([])
-                            else:
-                                # Ensure it's valid JSON
-                                json.loads(entry['convex_hull'])
-                        except json.JSONDecodeError as e:
-                            print(
-                                f"Invalid JSON for convex_hull: {entry['convex_hull']}")
-                            entry['convex_hull'] = json.dumps([])
 
                         cur.execute("""
                             INSERT INTO outage_tracker (
