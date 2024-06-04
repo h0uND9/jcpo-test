@@ -420,7 +420,7 @@ def update_tracker(data):
             cur = conn.cursor()
 
             cur.execute("""
-                SELECT outage_identifer FROM outage_tracker
+                SELECT outage_identifer FROM outage_tracker WHERE outage_restored = false
             """)
             tracker_identifers = [row[0] for row in cur.fetchall()]
 
@@ -502,6 +502,13 @@ Method for connecting to the database
 def connect_db():
     try:
         conn = psycopg2.connect(config("REMOTE_DB_SERVICE"))
+        # conn = psycopg2.connect(
+        #     database=config("DB_NAME"),
+        #     user=config("DB_USER"),
+        #     password=config("DB_PASSWORD"),
+        #     host=config("DB_HOST"),
+        #     port=config("DB_PORT"),
+        # )
     except Exception as e:
         print(f"Error connecting to the database: {str(e)}")
     finally:
